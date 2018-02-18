@@ -149,7 +149,9 @@
 
 //#define ADV_RAMP_OPTIONS        // In ramping, enables "mode set" additional method for lock-out and battery voltage display, comment out to disable
 
-#define TRIPLE_CLICK_BATT       // enable a triple-click to display Battery status
+// Do not define both of these...
+// #define TRIPLE_CLICK_BATT       // enable a triple-click to display Battery status
+#define TRIPLE_CLICK_SAVE_PRESET// enable a triple-click to save current level as preset starting point, makes mode-memory explicit.
 
 #define SHORT_CLICK_DUR 18      // Short click max duration - for 0.288 secs
 #define RAMP_MOON_PAUSE 23      // this results in a 0.368 sec delay, paused in moon mode
@@ -351,6 +353,9 @@ byte tempCeil = DEFAULT_THERM_CEIL;
 volatile byte rampingLevel = 0;     // 0=OFF, 1..MAX_RAMP_LEVEL is the ramping table index, 255=moon mode
 volatile byte TargetLevel = 0;      // what the user requested (may be higher than actual level, due to thermal regulation)
 volatile byte ActualLevel;          // current brightness (may differ from rampingLevel or TargetLevel)
+byte lastLevel = 65;                // lastLevel is same as memorizedLevel, except if 
+byte lastPreset = 0;                // Way light turned on last, 0=Unknown, 1=Low, 2=Normal
+byte memorizedLowLevel = 1;           // mode memory (ish, not saved across battery changes)
 byte memorizedLevel = 65;           // mode memory (ish, not saved across battery changes)
 byte preTurboLevel = 65;            // only used to return from double-click turbo
 byte rampState = 0;                 // 0=OFF, 1=in lowest mode (moon) delay, 2=ramping Up, 3=Ramping Down, 4=ramping completed (Up or Dn)
@@ -955,8 +960,12 @@ ISR(WDT_vect)
                             rampPauseCntDn = RAMP_MOON_PAUSE;   // delay a little on moon
 
                             // set this to the 1st level
-                            rampingLevel = 1;
-                            SetLevel(1);
+                            rampingLevel = memorizedLowLevel;
+                            SetLevel(rampingLevel);
+
+
+                            // Record how light turned on
+                            lastPreset = 1;
 
                             dontToggleDir = 0;                  // clear it in case it got set from a timeout
                         }
@@ -1105,9 +1114,14 @@ ISR(WDT_vect)
                                     rampLastDirState = 3;
                                 }
                                 dontToggleDir = 0;
+                                // Record how light turned on
+                                lastPreset = 2;
                             // if we were on, turn off
                             } else {
+                                lastLevel = rampingLevel;
+                                #ifndef TRIPLE_CLICK_SAVE_PRESET
                                 memorizedLevel = rampingLevel;
+                                #endif
                                 rampingLevel = 0;
                             }
                             SetLevelSoft(rampingLevel);
@@ -1196,10 +1210,10 @@ ISR(WDT_vect)
                                 // make double-click toggle turbo, not a one-way trip
                                 // Note: rampingLevel is zero here,
                                 //       because double-click turns the light off and back on
-                                if (memorizedLevel == MAX_RAMP_LEVEL) {
+                                if (TargetLevel == MAX_RAMP_LEVEL) {
                                     rampingLevel = preTurboLevel;
                                 } else {
-                                    preTurboLevel = memorizedLevel;
+                                    preTurboLevel = TargetLevel;
                                     rampingLevel = MAX_RAMP_LEVEL;
                                 }
                                 SetLevelSoft(rampingLevel);
@@ -1210,6 +1224,25 @@ ISR(WDT_vect)
                         else if (fastClicks == 3)       // --> triple click: display battery check/status
                         {
                             modeState = BATT_READ_ST;
+                            //byDelayRamping = 1;         // don't act on ramping button presses
+                        }
+                        #endif
+
+                        #ifdef TRIPLE_CLICK_SAVE_PRESET
+                        else if (fastClicks == 3)       // --> triple click: save current level as preset starting point
+                        {
+                            // So we can't set memorized level to current level because with triple click
+                            // the first click turns light off, so on 3rd click light is off.
+                            switch(lastPreset)
+                            {
+                                case 1:
+                                    memorizedLowLevel = lastLevel;
+                                    break;
+                                case 2:
+                                    memorizedLevel = lastLevel;
+                                    break;
+                            }
+
                             //byDelayRamping = 1;         // don't act on ramping button presses
                         }
                         #endif
