@@ -154,7 +154,7 @@
 #define TRIPLE_CLICK_SAVE_PRESET// enable a triple-click to save current level as preset starting point, makes mode-memory explicit.
 
 #define SHORT_CLICK_DUR 18      // Short click max duration - for 0.288 secs
-#define RAMP_MOON_PAUSE 23      // this results in a 0.368 sec delay, paused in moon mode
+#define RAMP_MOON_PAUSE 9       // this results in a 0.368 sec delay, paused in moon mode
 
 #define D1 2                    // Drop over reverse polarity protection diode = 0.2 V
 
@@ -209,6 +209,13 @@
 #define BATT_READ_ST    (6)
 #define TEMP_READ_ST    (7)
 
+// Presets:
+#define OFF_PRESET      (1)
+#define LOW_PRESET      (2)
+#define NORMAL_PRESET   (3)
+#define HIGH_PRESET     (4)
+#define TURBO_PRESET    (5)
+#define RESTORE_PRESET  (6)
 
 #define FIRM_VERS_MODE  81
 
@@ -353,17 +360,22 @@ byte tempCeil = DEFAULT_THERM_CEIL;
 volatile byte rampingLevel = 0;     // 0=OFF, 1..MAX_RAMP_LEVEL is the ramping table index, 255=moon mode
 volatile byte TargetLevel = 0;      // what the user requested (may be higher than actual level, due to thermal regulation)
 volatile byte ActualLevel;          // current brightness (may differ from rampingLevel or TargetLevel)
-byte lastLevel = 65;                // lastLevel is same as memorizedLevel, except if 
-byte lastPreset = 0;                // Way light turned on last, 0=Unknown, 1=Low, 2=Normal
-byte memorizedLowLevel = 1;           // mode memory (ish, not saved across battery changes)
-byte memorizedLevel = 65;           // mode memory (ish, not saved across battery changes)
+byte lastLevel = 65;                // The last level before light was turned off,
+                                    // or maybe the last set-level..  maybe those are
+                                    // the same?
+byte lastPreset = OFF_PRESET;       // Last preset that was entered:
+                                    // OFF/LOW/NORMAL/HIGH/TURBO_PRESET
+byte memorizedLowLevel = 1;         // LOW_PRESET
+byte memorizedLevel = 65;           // NORMAL_PRESET / mode memory (ish, not saved across battery changes)
+byte memorizedHighLevel = MAX_RAMP_LEVEL; // HIGH_PRESET
 byte preTurboLevel = 65;            // only used to return from double-click turbo
+byte preTurboPreset = OFF_PRESET;   // only used to return from double-click turbo
 byte rampState = 0;                 // 0=OFF, 1=in lowest mode (moon) delay, 2=ramping Up, 3=Ramping Down, 4=ramping completed (Up or Dn)
 byte rampLastDirState = 0;          // last ramping state's direction: 2=up, 3=down
 byte dontToggleDir = 0;             // flag to not allow the ramping direction to switch//toggle
-//volatile byte byDelayRamping = 0;   // when the ramping needs to be temporarily disabled
 byte rampPauseCntDn;                // count down timer for ramping support
-
+byte delayedPreset = 0;
+byte tempTurbo = 0;
 
 // State and count vars:
 
@@ -429,7 +441,7 @@ void SetLevel(byte level)
     SetActualLevel(level);
 }
 
-#define SetLevelSoft SetLevel
+//#define SetLevelSoft SetLevel
 #ifndef SetLevelSoft
 // FIXME: this interferes with handling double-clicks
 // FIXME: looks bad when turning off, if ramp has repeated values at the bottom
@@ -888,6 +900,87 @@ ISR(ADC_vect)
         ADMUX  = ADCMUX_TEMP;
 }
 
+void TurnOff()
+{
+    rampState = 0;
+    lastLevel = rampingLevel;
+    #ifndef TRIPLE_CLICK_SAVE_PRESET
+    memorizedLevel = rampingLevel;
+    #endif
+    rampingLevel = 0;
+    SetLevelSoft(rampingLevel);
+}
+
+void SetDelayedPreset()
+{
+    switch (delayedPreset)
+    {
+        case LOW_PRESET:
+        case NORMAL_PRESET:
+        case HIGH_PRESET:
+            if (delayedPreset == LOW_PRESET)
+                rampingLevel = memorizedLowLevel;
+            else if (delayedPreset == NORMAL_PRESET)
+                rampingLevel = memorizedLevel;
+            else if (delayedPreset == HIGH_PRESET)
+                rampingLevel = memorizedHighLevel;
+
+            // Record how light turned on
+            lastPreset = delayedPreset;
+
+            // bugfix: make off->turbo work when memorizedLevel == turbo
+            preTurboLevel = rampingLevel;
+
+            // also set up other ramp vars to make sure ramping will work
+            rampState = 2;  // lo->hi
+            rampLastDirState = 2;
+            if (rampingLevel == MAX_RAMP_LEVEL) {
+                rampState = 3;  // hi->lo
+                rampLastDirState = 3;
+            }
+            dontToggleDir = 0;
+
+            SetLevelSoft(rampingLevel);
+            break;
+        case TURBO_PRESET:
+            if (rampingLevel > 0) {
+                lastLevel = rampingLevel;
+            }
+
+            SetLevelSoft(MAX_RAMP_LEVEL);
+            break;
+        case OFF_PRESET:
+            TurnOff();
+            break;
+        case RESTORE_PRESET:
+            if (lastLevel > 0)
+                rampingLevel = lastLevel;
+            if (lastPreset == LOW_PRESET)
+                rampingLevel = memorizedLowLevel;
+            else if (lastPreset == NORMAL_PRESET)
+                rampingLevel = memorizedLevel;
+            else if (lastPreset == HIGH_PRESET)
+                rampingLevel = memorizedHighLevel;
+
+            // bugfix: make off->turbo work when memorizedLevel == turbo
+            preTurboLevel = rampingLevel;
+
+            // also set up other ramp vars to make sure ramping will work
+            rampState = 2;  // lo->hi
+            rampLastDirState = 2;
+            if (rampingLevel == MAX_RAMP_LEVEL) {
+                rampState = 3;  // hi->lo
+                rampLastDirState = 3;
+            }
+            dontToggleDir = 0;
+
+            SetLevelSoft(rampingLevel);
+            break;
+
+    };
+
+    delayedPreset = 0;
+}
 
 /**************************************************************************************
 * WDT_vect - The watchdog timer - this is invoked every 16ms
@@ -937,7 +1030,6 @@ ISR(WDT_vect)
                 modeState = THERMAL_REG_ST;
             }
         }
-
         // For Tactical, turn on MAX while button is depressed
         // FIXME: tactical mode acts weird when user fast-clicks 3 times
         //        (goes to battcheck mode, then next click goes back to tactical mode)
@@ -946,26 +1038,56 @@ ISR(WDT_vect)
             rampingLevel = MAX_RAMP_LEVEL;
             SetLevel(rampingLevel);
         }
-
-        // long-press for ramping
-        else if ((wPressDuration >= SHORT_CLICK_DUR) && (modeState == RAMPING_ST))  // also in there was:  && !byDelayRamping
+        else if (tempTurbo > 0) {
+            // Do nothing.
+        }
+        // DoubleClick-LongPress
+        else if ((wPressDuration >= SHORT_CLICK_DUR) && (fastClicks == 2) && (modeState == RAMPING_ST))
         {
+            fastClicks = 0;
+            if (delayedPreset == OFF_PRESET) { // Light is on
+                delayedPreset = 0;
+                tempTurbo = 1; // 1=Keep light on
+            } else { // Light is off
+                tempTurbo = 2; // 2=Turn off after momentary turbo
+            }
+            delayedPreset = TURBO_PRESET;
+            SetDelayedPreset();
+        }
+        // Click-LongPress
+        else if ((wPressDuration >= SHORT_CLICK_DUR) && (fastClicks == 1) && (modeState == RAMPING_ST))
+        {
+            fastClicks = 0;
+            if (delayedPreset == OFF_PRESET) { // Light is on, Ramp down.
+                delayedPreset = 0;
+                rampState = 3;  // hi->lo
+                rampLastDirState = 3;
+                if (rampingLevel == 255) {
+                    rampState = 2;  // lo->hi
+                    rampLastDirState = 2;
+                }
+                dontToggleDir = 1;
+            } else { // Light is off, turn on to NORMAL_PRESET, next loop RAMP will begin.
+                delayedPreset = NORMAL_PRESET;
+                SetDelayedPreset();
+            }
+
+        }
+        // LongPress
+        else if ((wPressDuration >= SHORT_CLICK_DUR) && (modeState == RAMPING_ST))
+        {
+            SetDelayedPreset();
             {
                 switch (rampState)
                 {
                     case 0:        // ramping not initialized yet
                         if (rampingLevel == 0)
                         {
+                            delayedPreset = LOW_PRESET;
+                            SetDelayedPreset();
+
                             rampState = 1;
                             rampPauseCntDn = RAMP_MOON_PAUSE;   // delay a little on moon
-
-                            // set this to the 1st level
-                            rampingLevel = memorizedLowLevel;
-                            SetLevel(rampingLevel);
-
-
-                            // Record how light turned on
-                            lastPreset = 1;
 
                             dontToggleDir = 0;                  // clear it in case it got set from a timeout
                         }
@@ -1007,18 +1129,19 @@ ISR(WDT_vect)
 
                     case 2:        // lo->hi
                         rampLastDirState = 2;
-                        if (rampingLevel < MAX_RAMP_LEVEL)
-                        {
+                        if (rampingLevel < MAX_RAMP_LEVEL) //Double rate ramping up.
                             rampingLevel ++;
-                        }
+
+                        if (rampingLevel < MAX_RAMP_LEVEL)
+                            rampingLevel ++;
                         else
-                        {
                             rampState = 4;
-                        }
-                        if ((rampingLevel == MAX_RAMP_LEVEL) || (rampingLevel == MAX_7135_LEVEL)) {
+
+                        if (rampingLevel == MAX_RAMP_LEVEL) {
                             SetActualLevel(0);  // Do a quick blink
                             _delay_ms(7);
                         }
+
                         SetLevel(rampingLevel);
                         dontToggleDir = 0;
                         break;
@@ -1069,6 +1192,15 @@ ISR(WDT_vect)
         // Was previously pressed - button released
         if (wPressDuration > 0)
         {
+            if (tempTurbo == 1) {
+                delayedPreset = RESTORE_PRESET;
+                SetDelayedPreset();
+                tempTurbo = 0;
+            } else if (tempTurbo == 2) {
+                delayedPreset = OFF_PRESET;
+                SetDelayedPreset();
+                tempTurbo = 0;
+            }
 
             rampState = 0;  // reset state to not ramping
 
@@ -1101,40 +1233,18 @@ ISR(WDT_vect)
                         {
                             byModeForMultiClicks = modeState;       // save current mode
 
-                            // if we were off, turn on at memorized level
-                            if (rampingLevel == 0) {
-                                rampingLevel = memorizedLevel;
-                                // bugfix: make off->turbo work when memorizedLevel == turbo
-                                preTurboLevel = memorizedLevel;
-                                // also set up other ramp vars to make sure ramping will work
-                                rampState = 2;  // lo->hi
-                                rampLastDirState = 2;
-                                if (rampingLevel == MAX_RAMP_LEVEL) {
-                                    rampState = 3;  // hi->lo
-                                    rampLastDirState = 3;
-                                }
-                                dontToggleDir = 0;
-                                // Record how light turned on
-                                lastPreset = 2;
-                            // if we were on, turn off
-                            } else {
-                                lastLevel = rampingLevel;
-                                #ifndef TRIPLE_CLICK_SAVE_PRESET
-                                memorizedLevel = rampingLevel;
-                                #endif
-                                rampingLevel = 0;
-                            }
-                            SetLevelSoft(rampingLevel);
-
-                            //byDelayRamping = 1;       // don't act on ramping button presses
+                            if ((delayedPreset == 0) && (rampingLevel == 0)) // Was off, turn on...
+                                delayedPreset = NORMAL_PRESET;
+                            else // Was on, turn off...
+                                delayedPreset = OFF_PRESET;
                         }
                         else if (fastClicks == 10)      // --> 10 clicks: flip thermal regulation control
                             b10Clicks = 1;
                         else                            // --> 2+ clicks: turn off the output
                         {
                             // prevent flashes while entering long click sequences
-                            rampingLevel = 0;
-                            SetLevel(rampingLevel);
+                            ////rampingLevel = 0;
+                            ////SetLevel(rampingLevel);
                         }
                         break;
 
@@ -1155,7 +1265,6 @@ ISR(WDT_vect)
                             modeState = tacticalSet;            // set to Ramping or Tactical
                             rampingLevel = 0;
                             SetLevel(rampingLevel);
-                            //byDelayRamping = 1;                 // don't act on ramping button presses
                         }
                         break;
                 } // switch
@@ -1168,8 +1277,6 @@ ISR(WDT_vect)
             }
 
             wPressDuration = 0;
-
-            //byDelayRamping = 0;   // restore acting on ramping button presses, if disabled
 
             wIdleTicks = 0; // reset idle time
 
@@ -1196,7 +1303,10 @@ ISR(WDT_vect)
                     //        (only do this in ramping mode, or from off)
                     case RAMPING_ST:
                     case TACTICAL_ST:
-                        if (fastClicks == 2)            // --> double click
+                        if (fastClicks == 1){
+                            SetDelayedPreset();
+                        }
+                        else if (fastClicks == 2)            // --> double click
                         {
                             // --> battcheck to tempcheck
                             // FIXME: why is this handled here instead of below under battcheck state?
@@ -1207,16 +1317,16 @@ ISR(WDT_vect)
                             // --> ramp direct to MAX/turbo (or back)
                             else if (modeState == RAMPING_ST)
                             {
-                                // make double-click toggle turbo, not a one-way trip
-                                // Note: rampingLevel is zero here,
-                                //       because double-click turns the light off and back on
-                                if (TargetLevel == MAX_RAMP_LEVEL) {
-                                    rampingLevel = preTurboLevel;
-                                } else {
-                                    preTurboLevel = TargetLevel;
-                                    rampingLevel = MAX_RAMP_LEVEL;
-                                }
-                                SetLevelSoft(rampingLevel);
+                                if (lastPreset == LOW_PRESET)
+                                    delayedPreset = NORMAL_PRESET;
+                                else if (lastPreset == NORMAL_PRESET)
+                                    delayedPreset = HIGH_PRESET;
+                                else if (lastPreset == HIGH_PRESET)
+                                    delayedPreset = NORMAL_PRESET;
+                                else
+                                    delayedPreset = HIGH_PRESET;
+
+                                SetDelayedPreset();
                             }
                         }
 
@@ -1224,26 +1334,27 @@ ISR(WDT_vect)
                         else if (fastClicks == 3)       // --> triple click: display battery check/status
                         {
                             modeState = BATT_READ_ST;
-                            //byDelayRamping = 1;         // don't act on ramping button presses
                         }
                         #endif
 
                         #ifdef TRIPLE_CLICK_SAVE_PRESET
                         else if (fastClicks == 3)       // --> triple click: save current level as preset starting point
                         {
-                            // So we can't set memorized level to current level because with triple click
-                            // the first click turns light off, so on 3rd click light is off.
                             switch(lastPreset)
                             {
-                                case 1:
-                                    memorizedLowLevel = lastLevel;
+                                if (rampingLevel != 0)
+                                case LOW_PRESET:
+                                    memorizedLowLevel = (rampingLevel == 0) ? lastLevel : rampingLevel;
                                     break;
-                                case 2:
-                                    memorizedLevel = lastLevel;
+                                case NORMAL_PRESET:
+                                    memorizedLevel = (rampingLevel == 0) ? lastLevel : rampingLevel;
+                                    break;
+                                case HIGH_PRESET:
+                                    memorizedHighLevel = (rampingLevel == 0) ? lastLevel : rampingLevel;
                                     break;
                             }
 
-                            //byDelayRamping = 1;         // don't act on ramping button presses
+                            delayedPreset = 0;
                         }
                         #endif
 
@@ -1253,19 +1364,16 @@ ISR(WDT_vect)
                                 modeState = TACTICAL_ST;
                             else
                                 modeState = RAMPING_ST;
-                            //byDelayRamping = 1;         // don't act on ramping button presses
                         }
 
                         else if (fastClicks == 6)       // --> 6 clicks: set Lockout Mode
                         {
                             modeState = LOCKOUT_ST;
-                            //byDelayRamping = 1;         // don't act on ramping button presses
                         }
 
                         else if (fastClicks == 8)       // --> 8 clicks: set Beacon Mode
                         {
                             modeState = BEACON_ST;
-                            //byDelayRamping = 1;         // don't act on ramping button presses
                         }
                         break;
 
@@ -1273,7 +1381,6 @@ ISR(WDT_vect)
                         if (fastClicks == 6)            // --> 6 clicks: clear Lock Out Mode
                         {
                             modeState = tacticalSet;    // set to Ramping or Tactical
-                            //byDelayRamping = 1;         // don't act on ramping button presses
                         }
                         break;
 
@@ -1286,13 +1393,21 @@ ISR(WDT_vect)
                 }
 
                 fastClicks = 0;
+                delayedPreset = 0;
             }
 
             // For ramping, timeout the direction toggling
             if ((rampingLevel > 1) && (rampingLevel < MAX_RAMP_LEVEL))
             {
-                if (wIdleTicks > RAMP_SWITCH_TIMEOUT)
+                if (wIdleTicks > RAMP_SWITCH_TIMEOUT) {
+                    rampState = 2;  // lo->hi
+                    rampLastDirState = 2;
+                    if (rampingLevel == MAX_RAMP_LEVEL) {
+                        rampState = 3;  // hi->lo
+                        rampLastDirState = 3;
+                    }
                     dontToggleDir = 1;
+                }
             }
 
             //------------------------------------------------------------------------------
@@ -1481,7 +1596,6 @@ int main(void)
                     _delay_ms(250);
                     Blink(4, 60);
 
-                    //byDelayRamping = 0;       // restore acting on ramping button presses
                     break;
 
                 case BEACON_ST:
@@ -1542,8 +1656,6 @@ int main(void)
 
                 case BATT_READ_ST:
                     _delay_ms(400);  // delay a little here to give the user a chance to see a full blink sequence
-
-                    //byDelayRamping = 0;       // restore acting on ramping button presses
 
                     while (modeState == BATT_READ_ST)  // Battery Check
                     {
