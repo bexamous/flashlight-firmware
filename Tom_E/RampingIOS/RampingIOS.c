@@ -1317,14 +1317,18 @@ ISR(WDT_vect)
                             // --> ramp direct to MAX/turbo (or back)
                             else if (modeState == RAMPING_ST)
                             {
-                                if (lastPreset == LOW_PRESET)
-                                    delayedPreset = NORMAL_PRESET;
-                                else if (lastPreset == NORMAL_PRESET)
-                                    delayedPreset = HIGH_PRESET;
-                                else if (lastPreset == HIGH_PRESET)
-                                    delayedPreset = NORMAL_PRESET;
-                                else
-                                    delayedPreset = HIGH_PRESET;
+                                // FIXME: This is pointlessly convoluted.
+                                // delayedPreset == NORMAL_PRESET light was off.
+                                // delayedPreset == OFF_PRESET light was on.
+                                if (delayedPreset == NORMAL_PRESET)
+                                    delayedPreset = HIGH_PRESET; // From off go to High.
+                                else if (delayedPreset == OFF_PRESET) {
+                                    if (lastPreset == HIGH_PRESET)
+                                        delayedPreset = NORMAL_PRESET; // If HIGH go to NORMAL.
+                                    else
+                                        delayedPreset = HIGH_PRESET; // If not HIGH go to HIGH.
+                                } else
+                                        delayedPreset = HIGH_PRESET; // Anything else just go to HIGH.
 
                                 SetDelayedPreset();
                             }
