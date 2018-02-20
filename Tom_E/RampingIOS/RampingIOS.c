@@ -900,6 +900,22 @@ ISR(ADC_vect)
         ADMUX  = ADCMUX_TEMP;
 }
 
+void SaveSetLevelSoft(byte level)
+{
+    if (rampingLevel > 0) {
+        lastLevel = rampingLevel;
+    }
+    SetLevelSoft(level);
+}
+
+void SaveSetLevel(byte level)
+{
+    if (rampingLevel > 0) {
+        lastLevel = rampingLevel;
+    }
+    SetLevel(level);
+}
+
 void TurnOff()
 {
     rampState = 0;
@@ -940,27 +956,26 @@ void SetDelayedPreset()
             }
             dontToggleDir = 0;
 
-            SetLevelSoft(rampingLevel);
+            SaveSetLevelSoft(rampingLevel);
             break;
         case TURBO_PRESET:
-            if (rampingLevel > 0) {
-                lastLevel = rampingLevel;
-            }
-
-            SetLevelSoft(MAX_RAMP_LEVEL);
+            SaveSetLevelSoft(MAX_RAMP_LEVEL);
             break;
         case OFF_PRESET:
             TurnOff();
             break;
         case RESTORE_PRESET:
-            if (lastLevel > 0)
-                rampingLevel = lastLevel;
+            // Minimally go to last PRESET level... (unsure if this is needed.)
             if (lastPreset == LOW_PRESET)
                 rampingLevel = memorizedLowLevel;
             else if (lastPreset == NORMAL_PRESET)
                 rampingLevel = memorizedLevel;
             else if (lastPreset == HIGH_PRESET)
                 rampingLevel = memorizedHighLevel;
+
+            // But if lastLevel is set go to it...
+            if (lastLevel > 0)
+                rampingLevel = lastLevel;
 
             // bugfix: make off->turbo work when memorizedLevel == turbo
             preTurboLevel = rampingLevel;
@@ -974,7 +989,7 @@ void SetDelayedPreset()
             }
             dontToggleDir = 0;
 
-            SetLevelSoft(rampingLevel);
+            SaveSetLevelSoft(rampingLevel);
             break;
 
     };
@@ -1107,13 +1122,13 @@ ISR(WDT_vect)
                             if (rampingLevel == MAX_RAMP_LEVEL)
                             {
                                 rampState = 3;  // hi->lo
-                                SetLevel(MAX_RAMP_LEVEL);
+                                SaveSetLevel(MAX_RAMP_LEVEL);
                             }
                             else if (rampingLevel == 255)  // If stopped in ramping moon mode, start from lowest
                             {
                                 rampState = 2; // lo->hi
                                 rampingLevel = 1;
-                                SetLevel(rampingLevel);
+                                SaveSetLevel(rampingLevel);
                             }
                             else if (rampingLevel == 1)
                                 rampState = 2;  // lo->hi
@@ -1142,7 +1157,7 @@ ISR(WDT_vect)
                             _delay_ms(7);
                         }
 
-                        SetLevel(rampingLevel);
+                        SaveSetLevel(rampingLevel);
                         dontToggleDir = 0;
                         break;
 
@@ -1160,7 +1175,7 @@ ISR(WDT_vect)
                             SetActualLevel(0);  // Do a quick blink
                             _delay_ms(7);
                         }
-                        SetLevel(rampingLevel);
+                        SaveSetLevel(rampingLevel);
                         dontToggleDir = 0;
                         break;
 
