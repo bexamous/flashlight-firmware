@@ -154,7 +154,7 @@
 #define TRIPLE_CLICK_SAVE_PRESET// enable a triple-click to save current level as preset starting point, makes mode-memory explicit.
 
 #define SHORT_CLICK_DUR 18      // Short click max duration - for 0.288 secs
-#define RAMP_MOON_PAUSE 9       // this results in a 0.368 sec delay, paused in moon mode
+#define RAMP_MOON_PAUSE 18       // this results in a 0.368 sec delay, paused in moon mode
 
 #define D1 2                    // Drop over reverse polarity protection diode = 0.2 V
 
@@ -366,8 +366,8 @@ byte lastLevel = 65;                // The last level before light was turned of
 byte lastPreset = OFF_PRESET;       // Last preset that was entered:
                                     // OFF/LOW/NORMAL/HIGH/TURBO_PRESET
 byte memorizedLowLevel = 1;         // LOW_PRESET
-byte memorizedLevel = 65;           // NORMAL_PRESET / mode memory (ish, not saved across battery changes)
-byte memorizedHighLevel = MAX_RAMP_LEVEL; // HIGH_PRESET
+byte memorizedLevel = 50;           // NORMAL_PRESET / mode memory (ish, not saved across battery changes)
+byte memorizedHighLevel = 100;      // HIGH_PRESET
 byte preTurboLevel = 65;            // only used to return from double-click turbo
 byte preTurboPreset = OFF_PRESET;   // only used to return from double-click turbo
 byte rampState = 0;                 // 0=OFF, 1=in lowest mode (moon) delay, 2=ramping Up, 3=Ramping Down, 4=ramping completed (Up or Dn)
@@ -1059,8 +1059,8 @@ ISR(WDT_vect)
         else if (tempTurbo > 0) {
             // Do nothing.
         }
-        // DoubleClick-LongPress
-        else if ((wPressDuration >= SHORT_CLICK_DUR) && (fastClicks == 2) && (modeState == RAMPING_ST))
+        // Click-LongPress
+        else if ((wPressDuration >= SHORT_CLICK_DUR) && (fastClicks == 1) && (modeState == RAMPING_ST))
         {
             fastClicks = 0;
             if (delayedPreset == OFF_PRESET) { // Light is on
@@ -1072,19 +1072,13 @@ ISR(WDT_vect)
             delayedPreset = TURBO_PRESET;
             SetDelayedPreset();
         }
-        // Click-LongPress
-        else if ((wPressDuration >= SHORT_CLICK_DUR) && (fastClicks == 1) && (modeState == RAMPING_ST))
+        // DoubleClick-LongPress
+        else if ((wPressDuration >= SHORT_CLICK_DUR) && (fastClicks == 2) && (modeState == RAMPING_ST))
         {
             fastClicks = 0;
-            if (delayedPreset == OFF_PRESET) { // Light is on, Ramp down.
-                delayedPreset = 0;
-                rampState = 3;  // hi->lo
-                rampLastDirState = 3;
-                if (rampingLevel == 255) {
-                    rampState = 2;  // lo->hi
-                    rampLastDirState = 2;
-                }
-                dontToggleDir = 1;
+            if (delayedPreset == OFF_PRESET) { // Light is on, go to LOW_PRESET, next loop RAMP begin.
+                delayedPreset = LOW_PRESET;
+                SetDelayedPreset();
             } else { // Light is off, turn on to NORMAL_PRESET, next loop RAMP will begin.
                 delayedPreset = NORMAL_PRESET;
                 SetDelayedPreset();
@@ -1147,8 +1141,6 @@ ISR(WDT_vect)
 
                     case 2:        // lo->hi
                         rampLastDirState = 2;
-                        if (rampingLevel < MAX_RAMP_LEVEL) //Double rate ramping up.
-                            rampingLevel ++;
 
                         if (rampingLevel < MAX_RAMP_LEVEL)
                             rampingLevel ++;
