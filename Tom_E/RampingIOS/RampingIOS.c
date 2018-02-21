@@ -953,7 +953,7 @@ void SetDelayedPreset()
             // also set up other ramp vars to make sure ramping will work
             rampState = 2;  // lo->hi
             rampLastDirState = 2;
-            if (rampingLevel == MAX_RAMP_LEVEL) {
+            if (rampingLevel >= memorizedHighLevel) {
                 rampState = 3;  // hi->lo
                 rampLastDirState = 3;
             }
@@ -986,7 +986,7 @@ void SetDelayedPreset()
             // also set up other ramp vars to make sure ramping will work
             rampState = 2;  // lo->hi
             rampLastDirState = 2;
-            if (rampingLevel == MAX_RAMP_LEVEL) {
+            if (rampingLevel >= memorizedHighLevel) {
                 rampState = 3;  // hi->lo
                 rampLastDirState = 3;
             }
@@ -1417,7 +1417,7 @@ ISR(WDT_vect)
                 if (wIdleTicks > RAMP_SWITCH_TIMEOUT) {
                     rampState = 2;  // lo->hi
                     rampLastDirState = 2;
-                    if (rampingLevel == MAX_RAMP_LEVEL) {
+                    if (rampingLevel >= memorizedHighLevel) {
                         rampState = 3;  // hi->lo
                         rampLastDirState = 3;
                     }
