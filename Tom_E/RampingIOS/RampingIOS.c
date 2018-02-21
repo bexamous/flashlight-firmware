@@ -461,7 +461,7 @@ void SetLevelSoft(byte level)
             ActualLevel += (diff >> 2) | (diff!=0);
 
         SetLevel(ActualLevel);
-        _delay_ms(RAMP_SIZE/4);  // fast ramp
+        _delay_ms(RAMP_SIZE/8);  // fast ramp
     } while (target_level != ActualLevel);
 }
 #endif
