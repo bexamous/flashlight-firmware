@@ -1051,10 +1051,11 @@ ISR(WDT_vect)
         // For Tactical, turn on MAX while button is depressed
         // FIXME: tactical mode acts weird when user fast-clicks 3 times
         //        (goes to battcheck mode, then next click goes back to tactical mode)
-        else if ((modeState == TACTICAL_ST) && (wPressDuration == 1) && (fastClicks < 2))
+        else if ((modeState == TACTICAL_ST) && (wPressDuration == 1))
         {
             rampingLevel = MAX_RAMP_LEVEL;
             SetLevel(rampingLevel);
+            fastClicks=0;
         }
         else if (tempTurbo > 0) {
             // Do nothing.
@@ -1593,7 +1594,7 @@ int main(void)
                         Blink(4, 60);
 
                         tacticalSet = 1;
-                        SaveConfig();
+                        // SaveConfig();
                     }
                     // FIXME: We can go from lockout to tactical???
                     //        (this code should probably be removed)
