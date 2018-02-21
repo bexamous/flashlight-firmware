@@ -449,15 +449,17 @@ void SetLevel(byte level)
 void SetLevelSoft(byte level)
 {
     uint8_t target_level = level;
-    int8_t shift_amount;
     int16_t diff;
     do {
         diff = target_level - ActualLevel;
-        if (ActualLevel < MAX_7135_LEVEL)
-            shift_amount = (diff >> 1) | (diff!=0);
-        else
-            shift_amount = (diff >> 2) | (diff!=0);
-        ActualLevel += shift_amount;
+
+        if ((diff > 0) && (diff < 32)) // Jump at the end.
+            ActualLevel = target_level;
+        else if ((diff < 0) && (diff > -32))
+            ActualLevel = target_level;
+        else // Ramp slow.
+            ActualLevel += (diff >> 2) | (diff!=0);
+
         SetLevel(ActualLevel);
         _delay_ms(RAMP_SIZE/4);  // fast ramp
     } while (target_level != ActualLevel);
